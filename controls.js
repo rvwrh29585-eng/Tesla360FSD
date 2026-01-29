@@ -9,7 +9,7 @@ import {
   resumeExperience,
   teardownExperience,
 } from "./stitcher.js";
-import { setMotionEffectsEnabled, setMotionIntensity } from "./motionEffects.js";
+import { setMotionEffectsEnabled, setMotionIntensity, setAutoSteerEnabled, setAutoSteerIntensity } from "./motionEffects.js";
 
 const statusText = document.getElementById("statusText");
 const togglePlayButton = document.getElementById("togglePlayButton");
@@ -47,6 +47,9 @@ const advancedWrap = document.getElementById("advancedWrap");
 const motionEffectsToggle = document.getElementById("motionEffectsToggle");
 const motionIntensitySlider = document.getElementById("motionIntensitySlider");
 const motionIntensityValue = document.getElementById("motionIntensityValue");
+const autoSteerToggle = document.getElementById("autoSteerToggle");
+const autoSteerSlider = document.getElementById("autoSteerSlider");
+const autoSteerValue = document.getElementById("autoSteerValue");
 
 function setStatus(text) {
   if (statusText) statusText.textContent = text;
@@ -497,7 +500,29 @@ if (lockPitchToggle) {
   });
 }
 
-// Motion effects controls
+// Auto-steer view tracking controls
+if (autoSteerToggle) {
+  autoSteerToggle.checked = state.autoSteerEnabled;
+  autoSteerToggle.addEventListener("change", (e) => {
+    setAutoSteerEnabled(e.target.checked);
+  });
+}
+
+if (autoSteerSlider) {
+  autoSteerSlider.value = state.autoSteerIntensity * 100;
+  if (autoSteerValue) {
+    autoSteerValue.textContent = `${Math.round(state.autoSteerIntensity * 100)}%`;
+  }
+  autoSteerSlider.addEventListener("input", (e) => {
+    const val = parseFloat(e.target.value) / 100;
+    setAutoSteerIntensity(val);
+    if (autoSteerValue) {
+      autoSteerValue.textContent = `${Math.round(val * 100)}%`;
+    }
+  });
+}
+
+// Motion effects controls (G-force shake)
 if (motionEffectsToggle) {
   motionEffectsToggle.checked = state.motionEffectsEnabled;
   motionEffectsToggle.addEventListener("change", (e) => {

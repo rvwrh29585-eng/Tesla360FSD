@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { updateGForceFromTelemetry } from "./motionEffects.js";
+import { updateGForceFromTelemetry, updateSteeringFromTelemetry } from "./motionEffects.js";
 
 // DOM Elements
 const dashboardVis = document.getElementById("dashboardVis");
@@ -206,11 +206,13 @@ export function updateVisForCurrentTime(currentTime) {
   if (frame && frame.sei) {
     currentSei = frame.sei;
     updateVisualization(frame.sei);
-    // Update motion effects with current G-force data
+    // Update motion effects with current telemetry data
     updateGForceFromTelemetry(frame.sei);
+    updateSteeringFromTelemetry(frame.sei);
   } else {
     currentSei = null;
     updateGForceFromTelemetry(null);
+    updateSteeringFromTelemetry(null);
   }
 }
 

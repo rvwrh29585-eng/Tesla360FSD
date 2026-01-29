@@ -45,6 +45,11 @@ export const state = {
   motionEffectsEnabled: true,
   motionIntensity: 1.0, // 0-2 multiplier
   
+  // Auto-steer view tracking
+  autoSteerEnabled: true,      // View follows steering direction
+  autoSteerIntensity: 0.5,     // How much steering affects view (0-1)
+  currentSteerYaw: 0,          // Current steering-induced yaw offset
+  
   // Smoothed G-force values (updated each frame)
   smoothedGForce: {
     x: 0, // lateral (turning)

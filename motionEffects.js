@@ -276,3 +276,114 @@ export function setMotionEffectsEnabled(enabled) {
 export function setMotionIntensity(intensity) {
   state.motionIntensity = clamp(intensity, 0, 2);
 }
+
+// ============================================================
+// AUTO-STEER VIEW TRACKING
+// Makes the 360 view naturally follow where the car is going
+// ============================================================
+
+let targetSteerYaw = 0;
+let currentSteeringAngle = 0;
+
+/**
+ * Update steering angle from telemetry
+ */
+export function updateSteeringFromTelemetry(sei) {
+  if (!sei || !state.autoSteerEnabled) {
+    // Smoothly return to center when disabled
+    currentSteeringAngle = lerp(currentSteeringAngle, 0, 0.05);
+    return;
+  }
+  
+  // Get steering wheel angle (degrees, positive = right turn)
+  const rawAngle = sei.steeringWheelAngle || 0;
+  
+  // Smooth the steering input
+  currentSteeringAngle = lerp(currentSteeringAngle, rawAngle, 0.1);
+}
+
+/**
+ * Calculate auto-steer yaw offset
+ * Returns the yaw angle to apply to the view (radians)
+ */
+export function calculateAutoSteerYaw(speed = 0) {
+  if (!state.autoSteerEnabled || !hasValidTelemetry) {
+    // Smoothly return to center
+    state.currentSteerYaw = lerp(state.currentSteerYaw, 0, 0.03);
+    return state.currentSteerYaw;
+  }
+  
+  // Only apply steering-based yaw when moving
+  // (no point tracking steering in a parked car)
+  const isMoving = speed > 1.0; // ~2.2 mph
+  
+  if (!isMoving) {
+    state.currentSteerYaw = lerp(state.currentSteerYaw, 0, 0.05);
+    return state.currentSteerYaw;
+  }
+  
+  // Convert steering angle to view yaw
+  // Steering wheel typically has ~540 degrees lock-to-lock
+  // We want a max view rotation of about 45 degrees (0.78 rad) at full lock
+  const maxSteeringAngle = 270; // Half of full lock
+  const maxViewYaw = 0.6; // ~35 degrees max view rotation
+  
+  // Normalize steering to -1 to 1
+  const normalizedSteering = clamp(currentSteeringAngle / maxSteeringAngle, -1, 1);
+  
+  // Apply intensity and convert to radians
+  const targetYaw = normalizedSteering * maxViewYaw * state.autoSteerIntensity;
+  
+  // Speed-based scaling: more effect at higher speeds
+  // At low speed (parking), less view movement
+  // At highway speed, full effect
+  const speedFactor = clamp(speed / 20, 0.3, 1.0); // 20 m/s ≈ 45 mph for full effect
+  const scaledTargetYaw = targetYaw * speedFactor;
+  
+  // Smooth the transition (slower for natural feel)
+  state.currentSteerYaw = lerp(state.currentSteerYaw, scaledTargetYaw, 0.04);
+  
+  return state.currentSteerYaw;
+}
+
+/**
+ * Apply auto-steer yaw to OrbitControls
+ * This rotates the view target so the user looks where the car is going
+ */
+export function applyAutoSteerToControls(controls, camera) {
+  if (!controls || !camera || !state.autoSteerEnabled) return;
+  
+  const yawOffset = state.currentSteerYaw;
+  
+  // Rotate the controls target around the camera
+  // This makes the view pan in the direction of the turn
+  const targetDistance = 10; // Distance to look-at point
+  
+  // Calculate new target position based on yaw offset
+  // We're inside a sphere, looking outward
+  const baseYaw = Math.atan2(controls.target.x - camera.position.x, 
+                             controls.target.z - camera.position.z);
+  const newYaw = baseYaw + yawOffset;
+  
+  // Only update if there's meaningful change
+  if (Math.abs(yawOffset) > 0.001) {
+    // Gently nudge the target toward the steering direction
+    // This creates a natural "look where you're going" effect
+    controls.target.x = camera.position.x + Math.sin(newYaw) * targetDistance * 0.01;
+    controls.target.z = camera.position.z + Math.cos(newYaw) * targetDistance * 0.01;
+  }
+}
+
+/**
+ * Toggle auto-steer view tracking
+ */
+export function setAutoSteerEnabled(enabled) {
+  state.autoSteerEnabled = enabled;
+}
+
+/**
+ * Set auto-steer intensity (0-1)
+ */
+export function setAutoSteerIntensity(intensity) {
+  state.autoSteerIntensity = clamp(intensity, 0, 1);
+}

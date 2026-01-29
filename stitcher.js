@@ -2,7 +2,7 @@ import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.180.0/
 import { OrbitControls } from "./OrbitControls.js";
 import { state, CAMS, RAD } from "./state.js";
 import { updateVisForCurrentTime, getCurrentSpeed } from "./telemetry.js";
-import { calculateCameraMotion, applySphereMotion, resetMotionEffects } from "./motionEffects.js";
+import { calculateCameraMotion, applySphereMotion, resetMotionEffects, calculateAutoSteerYaw, applyAutoSteerToControls } from "./motionEffects.js";
 
 function createVideoElement(src) {
   const video = document.createElement("video");
@@ -186,6 +186,11 @@ export function renderLoop(seekSlider, currentTimeLabel, formatTimeFn) {
   const speed = getCurrentSpeed();
   calculateCameraMotion(speed);
   applySphereMotion(state.sphere);
+  
+  // Apply auto-steer view tracking
+  // This gently rotates the view to follow the driving direction
+  calculateAutoSteerYaw(speed);
+  applyAutoSteerToControls(state.controls, state.camera);
   
   // Render the scene
   state.renderer.render(state.scene, state.camera);
