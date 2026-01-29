@@ -50,6 +50,8 @@ const motionIntensityValue = document.getElementById("motionIntensityValue");
 const autoSteerToggle = document.getElementById("autoSteerToggle");
 const autoSteerSlider = document.getElementById("autoSteerSlider");
 const autoSteerValue = document.getElementById("autoSteerValue");
+const immersionPreset = document.getElementById("immersionPreset");
+const immersionCustomControls = document.getElementById("immersionCustomControls");
 
 function setStatus(text) {
   if (statusText) statusText.textContent = text;
@@ -500,11 +502,92 @@ if (lockPitchToggle) {
   });
 }
 
-// Auto-steer view tracking controls
+// Immersion preset definitions
+const IMMERSION_PRESETS = {
+  off: {
+    autoSteerEnabled: false,
+    autoSteerIntensity: 0,
+    motionEffectsEnabled: false,
+    motionIntensity: 0,
+  },
+  subtle: {
+    autoSteerEnabled: true,
+    autoSteerIntensity: 0.25,
+    motionEffectsEnabled: true,
+    motionIntensity: 0.5,
+  },
+  auto: {
+    autoSteerEnabled: true,
+    autoSteerIntensity: 0.5,
+    motionEffectsEnabled: true,
+    motionIntensity: 1.0,
+  },
+  intense: {
+    autoSteerEnabled: true,
+    autoSteerIntensity: 0.8,
+    motionEffectsEnabled: true,
+    motionIntensity: 1.8,
+  },
+};
+
+function applyImmersionPreset(presetName) {
+  state.immersionPreset = presetName;
+  
+  // Show/hide custom controls
+  if (immersionCustomControls) {
+    immersionCustomControls.classList.toggle("hidden", presetName !== "custom");
+  }
+  
+  // If custom, don't change values - let user control them
+  if (presetName === "custom") return;
+  
+  // Apply preset values
+  const preset = IMMERSION_PRESETS[presetName];
+  if (!preset) return;
+  
+  // Apply auto-steer settings
+  setAutoSteerEnabled(preset.autoSteerEnabled);
+  setAutoSteerIntensity(preset.autoSteerIntensity);
+  
+  // Apply motion effects settings
+  setMotionEffectsEnabled(preset.motionEffectsEnabled);
+  setMotionIntensity(preset.motionIntensity);
+  
+  // Update UI controls to reflect preset values
+  if (autoSteerToggle) autoSteerToggle.checked = preset.autoSteerEnabled;
+  if (autoSteerSlider) {
+    autoSteerSlider.value = preset.autoSteerIntensity * 100;
+    if (autoSteerValue) autoSteerValue.textContent = `${Math.round(preset.autoSteerIntensity * 100)}%`;
+  }
+  if (motionEffectsToggle) motionEffectsToggle.checked = preset.motionEffectsEnabled;
+  if (motionIntensitySlider) {
+    motionIntensitySlider.value = preset.motionIntensity;
+    if (motionIntensityValue) motionIntensityValue.textContent = `${preset.motionIntensity.toFixed(1)}x`;
+  }
+}
+
+// Immersion preset selector
+if (immersionPreset) {
+  immersionPreset.value = state.immersionPreset;
+  // Apply default preset on load
+  applyImmersionPreset(state.immersionPreset);
+  
+  immersionPreset.addEventListener("change", (e) => {
+    applyImmersionPreset(e.target.value);
+  });
+}
+
+// Auto-steer view tracking controls (for custom mode)
 if (autoSteerToggle) {
   autoSteerToggle.checked = state.autoSteerEnabled;
   autoSteerToggle.addEventListener("change", (e) => {
     setAutoSteerEnabled(e.target.checked);
+    // Switch to custom when manually changed
+    if (immersionPreset && immersionPreset.value !== "custom") {
+      immersionPreset.value = "custom";
+      state.immersionPreset = "custom";
+      if (immersionCustomControls) immersionCustomControls.classList.remove("hidden");
+    }
   });
 }
 
@@ -522,11 +605,17 @@ if (autoSteerSlider) {
   });
 }
 
-// Motion effects controls (G-force shake)
+// Motion effects controls (G-force shake, for custom mode)
 if (motionEffectsToggle) {
   motionEffectsToggle.checked = state.motionEffectsEnabled;
   motionEffectsToggle.addEventListener("change", (e) => {
     setMotionEffectsEnabled(e.target.checked);
+    // Switch to custom when manually changed
+    if (immersionPreset && immersionPreset.value !== "custom") {
+      immersionPreset.value = "custom";
+      state.immersionPreset = "custom";
+      if (immersionCustomControls) immersionCustomControls.classList.remove("hidden");
+    }
   });
 }
 

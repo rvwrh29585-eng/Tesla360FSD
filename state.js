@@ -41,6 +41,9 @@ export const state = {
   telemetryFrames: [],
   frameTimes: [], // Cumulative time in seconds for each frame
   
+  // Immersion preset: 'off', 'subtle', 'auto', 'intense', 'custom'
+  immersionPreset: 'auto',
+  
   // Motion effects state
   motionEffectsEnabled: true,
   motionIntensity: 1.0, // 0-2 multiplier
