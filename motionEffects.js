@@ -45,6 +45,7 @@ function noise(phase) {
 /**
  * Check if SEI data contains valid telemetry
  * Tesla only includes SEI data in certain conditions
+ * NOTE: Protobuf.js converts snake_case to camelCase!
  */
 function isValidTelemetry(sei) {
   if (!sei) return false;
@@ -52,13 +53,13 @@ function isValidTelemetry(sei) {
   // Check if we have meaningful acceleration data
   // If all acceleration values are 0, telemetry wasn't recorded
   const hasAccel = (
-    sei.linear_acceleration_mps2_x !== undefined ||
-    sei.linear_acceleration_mps2_y !== undefined ||
-    sei.linear_acceleration_mps2_z !== undefined
+    sei.linearAccelerationMps2X !== undefined ||
+    sei.linearAccelerationMps2Y !== undefined ||
+    sei.linearAccelerationMps2Z !== undefined
   );
   
   // Also check for speed or other indicators
-  const hasSpeed = sei.vehicle_speed_mps !== undefined;
+  const hasSpeed = sei.vehicleSpeedMps !== undefined;
   
   return hasAccel || hasSpeed;
 }
@@ -83,13 +84,13 @@ export function updateGForceFromTelemetry(sei) {
   const config = state.motionConfig;
   const factor = config.smoothingFactor;
 
-  // Get raw G-force values from SEI
+  // Get raw G-force values from SEI (camelCase from protobuf.js)
   // X = lateral (positive = right turn)
   // Y = longitudinal (positive = acceleration, negative = braking)
   // Z = vertical (includes gravity ~9.8 m/s²)
-  const rawX = sei.linear_acceleration_mps2_x || 0;
-  const rawY = sei.linear_acceleration_mps2_y || 0;
-  const rawZ = sei.linear_acceleration_mps2_z || 0;
+  const rawX = sei.linearAccelerationMps2X || 0;
+  const rawY = sei.linearAccelerationMps2Y || 0;
+  const rawZ = sei.linearAccelerationMps2Z || 0;
 
   // Calibrate baseline Z on first valid reading
   // This accounts for gravity and sensor mounting

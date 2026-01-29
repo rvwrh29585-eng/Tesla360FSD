@@ -43,7 +43,8 @@ export function getCurrentSei() {
 }
 
 export function getCurrentSpeed() {
-  return currentSei?.vehicle_speed_mps || 0;
+  // Protobuf.js converts snake_case to camelCase
+  return currentSei?.vehicleSpeedMps || 0;
 }
 
 export async function initTelemetry() {
@@ -216,13 +217,16 @@ export function updateVisForCurrentTime(currentTime) {
 function updateVisualization(sei) {
   if (!sei) return;
 
+  // NOTE: Protobuf.js converts snake_case to camelCase!
+  // proto: vehicle_speed_mps -> JS: vehicleSpeedMps
+
   // Speed
-  const mps = sei.vehicle_speed_mps || 0;
+  const mps = sei.vehicleSpeedMps || 0;
   const mph = Math.round(mps * MPS_TO_MPH);
   if (speedValue) speedValue.textContent = mph;
 
   // Gear
-  const gear = sei.gear_state;
+  const gear = sei.gearState;
   [gearP, gearR, gearN, gearD].forEach((el) => el?.classList.remove("active"));
   if (gear === 0) gearP?.classList.add("active");
   else if (gear === 1) gearD?.classList.add("active");
@@ -230,15 +234,15 @@ function updateVisualization(sei) {
   else if (gear === 3) gearN?.classList.add("active");
 
   // Blinkers
-  blinkLeft?.classList.toggle("active", !!sei.blinker_on_left);
-  blinkRight?.classList.toggle("active", !!sei.blinker_on_right);
+  blinkLeft?.classList.toggle("active", !!sei.blinkerOnLeft);
+  blinkRight?.classList.toggle("active", !!sei.blinkerOnRight);
 
   // Steering
-  const angle = sei.steering_wheel_angle || 0;
+  const angle = sei.steeringWheelAngle || 0;
   if (steeringIcon) steeringIcon.style.transform = `rotate(${angle}deg)`;
 
   // Autopilot
-  const apState = sei.autopilot_state;
+  const apState = sei.autopilotState;
   if (autopilotStatus) {
     autopilotStatus.className = "autopilot-status"; // Reset
     if (apState === 2 || apState === 3) {
@@ -253,25 +257,25 @@ function updateVisualization(sei) {
   }
 
   // Brake
-  if (sei.brake_applied) {
+  if (sei.brakeApplied) {
     brakeInd?.classList.add("active");
   } else {
     brakeInd?.classList.remove("active");
   }
 
   // Accelerator
-  let accel = sei.accelerator_pedal_position || 0;
+  let accel = sei.acceleratorPedalPosition || 0;
   if (accel > 100) accel = 100;
   if (accel < 0) accel = 0;
   if (accelBar) accelBar.style.width = `${accel}%`;
 
   // Extra Data
   if (extraDataContainer && extraDataContainer.classList.contains("expanded")) {
-    if (valLat) valLat.textContent = (sei.latitude_deg || 0).toFixed(6);
-    if (valLon) valLon.textContent = (sei.longitude_deg || 0).toFixed(6);
-    if (valHeading) valHeading.textContent = (sei.heading_deg || 0).toFixed(1) + "°";
-    if (valAccX) valAccX.textContent = (sei.linear_acceleration_mps2_x || 0).toFixed(2);
-    if (valAccY) valAccY.textContent = (sei.linear_acceleration_mps2_y || 0).toFixed(2);
-    if (valAccZ) valAccZ.textContent = (sei.linear_acceleration_mps2_z || 0).toFixed(2);
+    if (valLat) valLat.textContent = (sei.latitudeDeg || 0).toFixed(6);
+    if (valLon) valLon.textContent = (sei.longitudeDeg || 0).toFixed(6);
+    if (valHeading) valHeading.textContent = (sei.headingDeg || 0).toFixed(1) + "°";
+    if (valAccX) valAccX.textContent = (sei.linearAccelerationMps2X || 0).toFixed(2);
+    if (valAccY) valAccY.textContent = (sei.linearAccelerationMps2Y || 0).toFixed(2);
+    if (valAccZ) valAccZ.textContent = (sei.linearAccelerationMps2Z || 0).toFixed(2);
   }
 }

@@ -35,3 +35,6 @@ build/
 
 # Workflow template (not needed in deployed site)
 WORKFLOW-TEMPLATE.md
+
+# Reference code (local only)
+references/
