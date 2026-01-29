@@ -32,14 +32,32 @@ function clamp(value, min, max) {
 
 /**
  * Generate organic noise for shake effect
+ * Combines multiple frequencies for realistic road vibration
  */
 function noise(phase) {
-  // Simple pseudo-random noise using sine waves at different frequencies
-  return (
-    Math.sin(phase * 1.0) * 0.5 +
-    Math.sin(phase * 2.3) * 0.3 +
-    Math.sin(phase * 4.7) * 0.2
-  );
+  // Low frequency sway (body roll from road undulation)
+  const lowFreq = Math.sin(phase * 0.7) * 0.3;
+  // Medium frequency (road texture)
+  const medFreq = Math.sin(phase * 2.3) * 0.4;
+  // High frequency (fine vibration)
+  const highFreq = Math.sin(phase * 5.7) * 0.2 + Math.sin(phase * 8.3) * 0.1;
+  
+  return lowFreq + medFreq + highFreq;
+}
+
+/**
+ * Generate high-frequency road texture vibration
+ * More aggressive than regular noise, simulates tire on asphalt
+ */
+function roadTexture(phase, intensity) {
+  const vibration = 
+    Math.sin(phase * 12.0) * 0.3 +
+    Math.sin(phase * 17.3) * 0.25 +
+    Math.sin(phase * 23.7) * 0.2 +
+    Math.sin(phase * 31.1) * 0.15 +
+    Math.sin(phase * 41.9) * 0.1;
+  
+  return vibration * intensity;
 }
 
 /**
@@ -151,22 +169,33 @@ export function calculateCameraMotion(speed = 0) {
   const isMoving = speed > 0.5; // More than ~1 mph
   
   if (isMoving) {
-    shakePhase += 0.2; // Advance noise phase
+    // Advance noise phase based on speed (faster = more vibration cycles)
+    const phaseSpeed = config.roadTextureFreq || 0.4;
+    shakePhase += phaseSpeed * (1 + speed * 0.02);
     
     // Base shake from vertical acceleration (bumps) - already baseline-adjusted
     const bumpShake = Math.abs(g.z) * config.shakeMultiplier * intensity;
     
     // Speed-based continuous micro-shake (faster = more vibration)
-    const speedShake = speed * config.speedShakeBase * intensity;
+    // This simulates road texture felt through the chassis
+    const speedFactor = Math.min(speed / 30, 1); // Normalize to ~67 mph max effect
+    const speedShake = speedFactor * config.speedShakeBase * intensity * 10;
     
-    // Combined shake magnitude
-    const shakeMagnitude = bumpShake + speedShake;
+    // High-frequency road texture vibration (subtle but constant when moving)
+    const textureX = roadTexture(shakePhase, speedShake * 0.5);
+    const textureY = roadTexture(shakePhase + 50, speedShake * 0.5);
     
-    const targetShakeX = noise(shakePhase) * shakeMagnitude;
-    const targetShakeY = noise(shakePhase + 100) * shakeMagnitude;
+    // Lower frequency body movement from bumps
+    const bumpX = noise(shakePhase * 0.3) * bumpShake;
+    const bumpY = noise(shakePhase * 0.3 + 100) * bumpShake;
     
-    state.cameraMotion.shakeX = lerp(state.cameraMotion.shakeX, targetShakeX, 0.3);
-    state.cameraMotion.shakeY = lerp(state.cameraMotion.shakeY, targetShakeY, 0.3);
+    // Combined shake
+    const targetShakeX = textureX + bumpX;
+    const targetShakeY = textureY + bumpY;
+    
+    // Quick response for road texture, slower for bumps
+    state.cameraMotion.shakeX = lerp(state.cameraMotion.shakeX, targetShakeX, 0.4);
+    state.cameraMotion.shakeY = lerp(state.cameraMotion.shakeY, targetShakeY, 0.4);
   } else {
     // Not moving - no shake
     state.cameraMotion.shakeX = lerp(state.cameraMotion.shakeX, 0, decay);

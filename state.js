@@ -62,13 +62,14 @@ export const state = {
   
   // Motion effect configuration
   motionConfig: {
-    rollMultiplier: 0.015,   // how much lateral G affects roll (subtle)
-    pitchMultiplier: 0.01,   // how much longitudinal G affects pitch (subtle)
-    shakeMultiplier: 0.001,  // how much vertical G affects shake
-    smoothingFactor: 0.08,   // lower = smoother (0-1)
-    maxRoll: 0.08,           // max roll in radians (~4.5 degrees)
-    maxPitch: 0.05,          // max pitch in radians (~2.8 degrees)
-    speedShakeBase: 0.0002,  // base shake from speed
+    rollMultiplier: 0.025,   // how much lateral G affects roll
+    pitchMultiplier: 0.018,  // how much longitudinal G affects pitch
+    shakeMultiplier: 0.003,  // how much vertical G affects shake (bumps)
+    smoothingFactor: 0.12,   // lower = smoother (0-1)
+    maxRoll: 0.12,           // max roll in radians (~7 degrees)
+    maxPitch: 0.08,          // max pitch in radians (~4.5 degrees)
+    speedShakeBase: 0.0004,  // base shake from speed (road texture)
+    roadTextureFreq: 0.4,    // how fast the road shake oscillates
   },
 };
 
