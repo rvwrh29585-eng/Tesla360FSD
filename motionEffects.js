@@ -2,12 +2,19 @@
  * Motion Effects Module
  * Applies immersive camera effects based on vehicle telemetry data.
  * Uses G-force data to create roll, pitch, and shake effects.
+ * 
+ * IMPORTANT: We rotate the SPHERE (video mesh), not the camera.
+ * This avoids conflicts with OrbitControls which manages camera rotation.
  */
 
 import { state } from "./state.js";
 
 // Noise generator for organic shake effect
 let shakePhase = 0;
+
+// Baseline Z acceleration (gravity) - calibrated on first valid reading
+let baselineZ = null;
+let hasValidTelemetry = false;
 
 /**
  * Smooth interpolation (exponential moving average)
@@ -36,35 +43,24 @@ function noise(phase) {
 }
 
 /**
- * Get current telemetry frame data
- * Returns null if no data available
+ * Check if SEI data contains valid telemetry
+ * Tesla only includes SEI data in certain conditions
  */
-export function getCurrentTelemetry(currentTime) {
-  if (!state.telemetryFrames || state.telemetryFrames.length === 0) {
-    return null;
-  }
-
-  // Find the frame for current time using binary search
-  // This mirrors the logic in telemetry.js
-  const frameTimes = state.frameTimes || [];
-  if (frameTimes.length === 0) return null;
-
-  let frameIndex = 0;
-  let low = 0;
-  let high = frameTimes.length - 1;
+function isValidTelemetry(sei) {
+  if (!sei) return false;
   
-  while (low <= high) {
-    const mid = (low + high) >>> 1;
-    if (frameTimes[mid] <= currentTime) {
-      frameIndex = mid;
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
-  }
-
-  const frame = state.telemetryFrames[frameIndex];
-  return frame?.sei || null;
+  // Check if we have meaningful acceleration data
+  // If all acceleration values are 0, telemetry wasn't recorded
+  const hasAccel = (
+    sei.linear_acceleration_mps2_x !== undefined ||
+    sei.linear_acceleration_mps2_y !== undefined ||
+    sei.linear_acceleration_mps2_z !== undefined
+  );
+  
+  // Also check for speed or other indicators
+  const hasSpeed = sei.vehicle_speed_mps !== undefined;
+  
+  return hasAccel || hasSpeed;
 }
 
 /**
@@ -72,9 +68,12 @@ export function getCurrentTelemetry(currentTime) {
  * Call this each frame with the current SEI data
  */
 export function updateGForceFromTelemetry(sei) {
-  if (!sei || !state.motionEffectsEnabled) {
+  // Check if we have valid telemetry
+  hasValidTelemetry = isValidTelemetry(sei);
+  
+  if (!hasValidTelemetry || !state.motionEffectsEnabled) {
     // Smoothly return to neutral when disabled or no data
-    const decay = 0.05;
+    const decay = 0.1;
     state.smoothedGForce.x = lerp(state.smoothedGForce.x, 0, decay);
     state.smoothedGForce.y = lerp(state.smoothedGForce.y, 0, decay);
     state.smoothedGForce.z = lerp(state.smoothedGForce.z, 0, decay);
@@ -87,25 +86,36 @@ export function updateGForceFromTelemetry(sei) {
   // Get raw G-force values from SEI
   // X = lateral (positive = right turn)
   // Y = longitudinal (positive = acceleration, negative = braking)
-  // Z = vertical (positive = upward, bumps)
+  // Z = vertical (includes gravity ~9.8 m/s²)
   const rawX = sei.linear_acceleration_mps2_x || 0;
   const rawY = sei.linear_acceleration_mps2_y || 0;
   const rawZ = sei.linear_acceleration_mps2_z || 0;
 
+  // Calibrate baseline Z on first valid reading
+  // This accounts for gravity and sensor mounting
+  if (baselineZ === null && rawZ !== 0) {
+    baselineZ = rawZ;
+  }
+
+  // Subtract baseline from Z to get bump-only component
+  const adjustedZ = baselineZ !== null ? (rawZ - baselineZ) : 0;
+
   // Smooth the values
   state.smoothedGForce.x = lerp(state.smoothedGForce.x, rawX, factor);
   state.smoothedGForce.y = lerp(state.smoothedGForce.y, rawY, factor);
-  state.smoothedGForce.z = lerp(state.smoothedGForce.z, rawZ, factor);
+  state.smoothedGForce.z = lerp(state.smoothedGForce.z, adjustedZ, factor);
 }
 
 /**
- * Calculate camera motion offsets based on current G-force
+ * Calculate motion offsets based on current G-force
  * Returns { roll, pitch, shakeX, shakeY }
  */
 export function calculateCameraMotion(speed = 0) {
-  if (!state.motionEffectsEnabled) {
-    // Smoothly return to neutral
-    const decay = 0.1;
+  const config = state.motionConfig;
+  const decay = 0.15;
+  
+  // If effects disabled or no valid telemetry, smoothly return to neutral
+  if (!state.motionEffectsEnabled || !hasValidTelemetry) {
     state.cameraMotion.roll = lerp(state.cameraMotion.roll, 0, decay);
     state.cameraMotion.pitch = lerp(state.cameraMotion.pitch, 0, decay);
     state.cameraMotion.shakeX = lerp(state.cameraMotion.shakeX, 0, decay);
@@ -113,77 +123,81 @@ export function calculateCameraMotion(speed = 0) {
     return state.cameraMotion;
   }
 
-  const config = state.motionConfig;
   const intensity = state.motionIntensity;
   const g = state.smoothedGForce;
 
   // --- Roll (lean into turns) ---
-  // Lateral G-force causes the camera to roll
-  // Negative X (left turn) = roll left (negative roll)
-  // Positive X (right turn) = roll right (positive roll)
+  // Lateral G-force causes the view to roll
+  // Positive X (right turn) = roll right
   const targetRoll = clamp(
-    -g.x * config.rollMultiplier * intensity,
+    g.x * config.rollMultiplier * intensity,
     -config.maxRoll,
     config.maxRoll
   );
 
   // --- Pitch (tilt forward/back) ---
   // Longitudinal G-force causes pitch
-  // Positive Y (acceleration) = pitch back slightly (positive pitch)
-  // Negative Y (braking) = pitch forward (negative pitch)
+  // Positive Y (acceleration) = pitch back slightly
+  // Negative Y (braking) = pitch forward
   const targetPitch = clamp(
-    -g.y * config.pitchMultiplier * intensity,
+    g.y * config.pitchMultiplier * intensity,
     -config.maxPitch,
     config.maxPitch
   );
 
   // --- Shake (road vibration) ---
-  // Combine vertical G-force bumps with speed-based shake
-  shakePhase += 0.3; // Advance noise phase
+  // Only apply shake when moving
+  const isMoving = speed > 0.5; // More than ~1 mph
   
-  // Base shake from vertical acceleration (bumps)
-  const bumpShake = Math.abs(g.z - 9.8) * config.shakeMultiplier * intensity;
-  
-  // Speed-based continuous micro-shake (faster = more vibration)
-  const speedMps = speed; // Already in m/s
-  const speedShake = speedMps * config.speedShakeBase * intensity;
-  
-  // Combined shake magnitude
-  const shakeMagnitude = bumpShake + speedShake;
-  
-  const targetShakeX = noise(shakePhase) * shakeMagnitude;
-  const targetShakeY = noise(shakePhase + 100) * shakeMagnitude;
+  if (isMoving) {
+    shakePhase += 0.2; // Advance noise phase
+    
+    // Base shake from vertical acceleration (bumps) - already baseline-adjusted
+    const bumpShake = Math.abs(g.z) * config.shakeMultiplier * intensity;
+    
+    // Speed-based continuous micro-shake (faster = more vibration)
+    const speedShake = speed * config.speedShakeBase * intensity;
+    
+    // Combined shake magnitude
+    const shakeMagnitude = bumpShake + speedShake;
+    
+    const targetShakeX = noise(shakePhase) * shakeMagnitude;
+    const targetShakeY = noise(shakePhase + 100) * shakeMagnitude;
+    
+    state.cameraMotion.shakeX = lerp(state.cameraMotion.shakeX, targetShakeX, 0.3);
+    state.cameraMotion.shakeY = lerp(state.cameraMotion.shakeY, targetShakeY, 0.3);
+  } else {
+    // Not moving - no shake
+    state.cameraMotion.shakeX = lerp(state.cameraMotion.shakeX, 0, decay);
+    state.cameraMotion.shakeY = lerp(state.cameraMotion.shakeY, 0, decay);
+  }
 
-  // Smooth the camera motion
-  const motionSmooth = 0.2;
+  // Smooth the roll and pitch
+  const motionSmooth = 0.12;
   state.cameraMotion.roll = lerp(state.cameraMotion.roll, targetRoll, motionSmooth);
   state.cameraMotion.pitch = lerp(state.cameraMotion.pitch, targetPitch, motionSmooth);
-  state.cameraMotion.shakeX = lerp(state.cameraMotion.shakeX, targetShakeX, 0.5);
-  state.cameraMotion.shakeY = lerp(state.cameraMotion.shakeY, targetShakeY, 0.5);
 
   return state.cameraMotion;
 }
 
 /**
- * Apply camera motion to Three.js camera
- * Should be called in the render loop after controls.update()
+ * Apply motion effects to the sphere mesh (NOT the camera!)
+ * This avoids conflicts with OrbitControls
  */
-export function applyCameraMotion(camera) {
-  if (!camera || !state.motionEffectsEnabled) return;
-
+export function applySphereMotion(sphere) {
+  if (!sphere) return;
+  
   const motion = state.cameraMotion;
-
-  // Apply roll (Z-axis rotation)
-  camera.rotation.z = motion.roll;
-
-  // Apply pitch offset by adjusting the camera's up direction slightly
-  // This creates a subtle "tilt" effect without breaking orbit controls
-  // We do this by rotating the camera around its local X axis
-  camera.rotateX(motion.pitch * 0.5);
-
-  // Apply shake as small position offsets
-  camera.position.x += motion.shakeX;
-  camera.position.y += motion.shakeY;
+  
+  // Apply roll and pitch to the sphere
+  // Since the camera looks at the sphere from inside, rotating the sphere
+  // creates the effect of the view tilting
+  sphere.rotation.z = motion.roll;
+  sphere.rotation.x = motion.pitch;
+  
+  // Apply shake as small position offsets to the sphere
+  sphere.position.x = motion.shakeX;
+  sphere.position.y = motion.shakeY;
 }
 
 /**
@@ -198,6 +212,16 @@ export function resetMotionEffects() {
   state.cameraMotion.shakeX = 0;
   state.cameraMotion.shakeY = 0;
   shakePhase = 0;
+  baselineZ = null;
+  hasValidTelemetry = false;
+  
+  // Reset sphere position/rotation if it exists
+  if (state.sphere) {
+    state.sphere.rotation.x = 0;
+    state.sphere.rotation.z = 0;
+    state.sphere.position.x = 0;
+    state.sphere.position.y = 0;
+  }
 }
 
 /**
@@ -206,7 +230,13 @@ export function resetMotionEffects() {
 export function setMotionEffectsEnabled(enabled) {
   state.motionEffectsEnabled = enabled;
   if (!enabled) {
-    // Effects will smoothly fade out via calculateCameraMotion
+    // Reset sphere immediately when disabled
+    if (state.sphere) {
+      state.sphere.rotation.x = 0;
+      state.sphere.rotation.z = 0;
+      state.sphere.position.x = 0;
+      state.sphere.position.y = 0;
+    }
   }
 }
 

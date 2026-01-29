@@ -2,7 +2,7 @@ import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.180.0/
 import { OrbitControls } from "./OrbitControls.js";
 import { state, CAMS, RAD } from "./state.js";
 import { updateVisForCurrentTime, getCurrentSpeed } from "./telemetry.js";
-import { calculateCameraMotion, applyCameraMotion, resetMotionEffects } from "./motionEffects.js";
+import { calculateCameraMotion, applySphereMotion, resetMotionEffects } from "./motionEffects.js";
 
 function createVideoElement(src) {
   const video = document.createElement("video");
@@ -181,10 +181,11 @@ export function renderLoop(seekSlider, currentTimeLabel, formatTimeFn) {
     updateVisForCurrentTime(t);
   }
   
-  // Calculate and apply motion effects based on current G-force
+  // Calculate and apply motion effects to the sphere (not camera)
+  // This avoids conflicts with OrbitControls
   const speed = getCurrentSpeed();
   calculateCameraMotion(speed);
-  applyCameraMotion(state.camera);
+  applySphereMotion(state.sphere);
   
   // Render the scene
   state.renderer.render(state.scene, state.camera);
