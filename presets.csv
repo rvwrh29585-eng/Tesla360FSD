@@ -1,0 +1,20 @@
+Name,Default View
+GlobalFOVscale,0.6
+Front,Yaw,0,FOV,100,Enabled
+LeftPillar,Yaw,60,FOV,100,Enabled
+LeftRepeater,Yaw,120,FOV,100,Enabled
+Back,Yaw,180,FOV,100,Enabled
+RightRepeater,Yaw,240,FOV,100,Enabled
+RightPillar,Yaw,300,FOV,100,Enabled
+LockPitch,true
+
+Name,WideFrontBack
+GlobalFOVscale,0.4
+Front,Yaw,0,FOV,100,Enabled
+LeftPillar,Yaw,40,FOV,100,Enabled
+LeftRepeater,Yaw,140,FOV,100,Enabled
+Back,Yaw,180,FOV,100,Enabled
+RightRepeater,Yaw,220,FOV,100,Enabled
+RightPillar,Yaw,320,FOV,100,Enabled
+LockPitch,false
+

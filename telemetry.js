@@ -1,0 +1,251 @@
+import { state } from "./state.js";
+
+// DOM Elements
+const dashboardVis = document.getElementById("dashboardVis");
+const telemetryToggle = document.getElementById("telemetryToggle");
+const toggleExtra = document.getElementById("toggleExtra");
+const extraDataContainer = document.querySelector(".extra-data-container");
+
+// Visualization Elements
+const speedValue = document.getElementById("speedValue");
+const gearP = document.getElementById("gearP");
+const gearR = document.getElementById("gearR");
+const gearN = document.getElementById("gearN");
+const gearD = document.getElementById("gearD");
+const blinkLeft = document.getElementById("blinkLeft");
+const blinkRight = document.getElementById("blinkRight");
+const steeringIcon = document.getElementById("steeringIcon");
+const autopilotStatus = document.getElementById("autopilotStatus");
+const apText = document.getElementById("apText");
+const brakeInd = document.getElementById("brakeInd");
+const accelBar = document.getElementById("accelBar");
+
+// Extra Data Elements
+const valLat = document.getElementById("valLat");
+const valLon = document.getElementById("valLon");
+const valHeading = document.getElementById("valHeading");
+const valAccX = document.getElementById("valAccX");
+const valAccY = document.getElementById("valAccY");
+const valAccZ = document.getElementById("valAccZ");
+
+let SeiMetadata = null;
+let enumFields = null;
+let mp4Parser = null;
+let frameTimes = []; // Cumulative time in seconds for each frame
+
+const MPS_TO_MPH = 2.23694;
+
+export async function initTelemetry() {
+  try {
+    // Load Protobuf
+    const response = await fetch("lib/dashcam.proto");
+    const protoText = await response.text();
+    const root = protobuf.parse(protoText).root;
+    SeiMetadata = root.lookupType("SeiMetadata");
+    enumFields = {
+      gearState: SeiMetadata.lookup("Gear"),
+      autopilotState: SeiMetadata.lookup("AutopilotState"),
+    };
+    console.log("Telemetry: Protobuf initialized");
+  } catch (e) {
+    console.error("Telemetry: Failed to init protobuf", e);
+  }
+
+  setupUI();
+}
+
+function setupUI() {
+  // Toggle Visibility
+  if (telemetryToggle) {
+    telemetryToggle.addEventListener("click", () => {
+      dashboardVis.classList.toggle("hidden");
+      const isHidden = dashboardVis.classList.contains("hidden");
+      telemetryToggle.style.opacity = isHidden ? "0.5" : "1";
+    });
+  }
+
+  // Toggle Extra Data
+  if (toggleExtra) {
+    toggleExtra.addEventListener("click", () => {
+      extraDataContainer.classList.toggle("expanded");
+      updateVisForCurrentTime(); // Refresh in case we paused
+    });
+  }
+
+  // Drag Logic
+  let isDragging = false;
+  let currentX;
+  let currentY;
+  let initialX;
+  let initialY;
+  let xOffset = 0;
+  let yOffset = 0;
+
+  const dragHandle = document.querySelector(".vis-header");
+
+  dragHandle.addEventListener("mousedown", dragStart);
+  document.addEventListener("mouseup", dragEnd);
+  document.addEventListener("mousemove", drag);
+
+  function dragStart(e) {
+    initialX = e.clientX - xOffset;
+    initialY = e.clientY - yOffset;
+    isDragging = true;
+  }
+
+  function dragEnd(e) {
+    initialX = currentX;
+    initialY = currentY;
+    isDragging = false;
+  }
+
+  function drag(e) {
+    if (isDragging) {
+      e.preventDefault();
+      currentX = e.clientX - initialX;
+      currentY = e.clientY - initialY;
+      xOffset = currentX;
+      yOffset = currentY;
+      setTranslate(currentX, currentY, dashboardVis);
+    }
+  }
+
+  function setTranslate(xPos, yPos, el) {
+    el.style.transform = `translate3d(${xPos}px, ${yPos}px, 0)`;
+  }
+}
+
+export async function loadTelemetryForFile(file) {
+  if (!file || !SeiMetadata) return;
+
+  console.log("Telemetry: Parsing file", file.name);
+  try {
+    const buffer = await file.arrayBuffer();
+    mp4Parser = new window.DashcamMP4(buffer);
+    const frames = mp4Parser.parseFrames(SeiMetadata);
+    state.telemetryFrames = frames;
+
+    // Build time index
+    const config = mp4Parser.getConfig();
+    let time = 0;
+    frameTimes = [];
+    // durations are in ms
+    config.durations.forEach((d) => {
+      frameTimes.push(time);
+      time += d / 1000;
+    });
+
+    // Ensure we have times for all frames
+    if (frameTimes.length < frames.length) {
+       // If durations are missing, assume 30fps?
+       // Usually config.durations matches frame count or is close.
+    }
+    
+    // Show overlay if hidden? Or let user toggle. 
+    // Maybe auto-show if data found.
+    if (frames.length > 0) {
+        dashboardVis.classList.remove("hidden");
+    }
+
+    console.log(`Telemetry: Loaded ${frames.length} frames`);
+  } catch (err) {
+    console.error("Telemetry: Error parsing file", err);
+    state.telemetryFrames = [];
+  }
+}
+
+export function updateVisForCurrentTime(currentTime) {
+  if (!state.telemetryFrames || state.telemetryFrames.length === 0) return;
+  if (currentTime === undefined) {
+      // Try to grab from state logic if needed, but usually passed in
+      // For now, return if undefined
+      return; 
+  }
+
+  // Find frame index
+  // Binary search or simple lookup since we are usually playing forward
+  // Simple approximation for now: assumes roughly monotonic increasing
+  let frameIndex = 0;
+  
+  // Optimization: use last frame index if available in state to start search?
+  // For now, simple findIndex or binary search
+  // Binary search for efficiency
+  let low = 0, high = frameTimes.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >>> 1;
+    if (frameTimes[mid] <= currentTime) {
+      frameIndex = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  const frame = state.telemetryFrames[frameIndex];
+  if (frame && frame.sei) {
+    updateVisualization(frame.sei);
+  }
+}
+
+function updateVisualization(sei) {
+  if (!sei) return;
+
+  // Speed
+  const mps = sei.vehicle_speed_mps || 0;
+  const mph = Math.round(mps * MPS_TO_MPH);
+  if (speedValue) speedValue.textContent = mph;
+
+  // Gear
+  const gear = sei.gear_state;
+  [gearP, gearR, gearN, gearD].forEach((el) => el?.classList.remove("active"));
+  if (gear === 0) gearP?.classList.add("active");
+  else if (gear === 1) gearD?.classList.add("active");
+  else if (gear === 2) gearR?.classList.add("active");
+  else if (gear === 3) gearN?.classList.add("active");
+
+  // Blinkers
+  blinkLeft?.classList.toggle("active", !!sei.blinker_on_left);
+  blinkRight?.classList.toggle("active", !!sei.blinker_on_right);
+
+  // Steering
+  const angle = sei.steering_wheel_angle || 0;
+  if (steeringIcon) steeringIcon.style.transform = `rotate(${angle}deg)`;
+
+  // Autopilot
+  const apState = sei.autopilot_state;
+  if (autopilotStatus) {
+    autopilotStatus.className = "autopilot-status"; // Reset
+    if (apState === 2 || apState === 3) {
+      autopilotStatus.classList.add("active-ap");
+      if (apText) apText.textContent = apState === 3 ? "TACC" : "Autosteer";
+    } else if (apState === 1) {
+      autopilotStatus.classList.add("active-fsd");
+      if (apText) apText.textContent = "FSD";
+    } else {
+      if (apText) apText.textContent = "Manual";
+    }
+  }
+
+  // Brake
+  if (sei.brake_applied) {
+    brakeInd?.classList.add("active");
+  } else {
+    brakeInd?.classList.remove("active");
+  }
+
+  // Accelerator
+  let accel = sei.accelerator_pedal_position || 0;
+  if (accel > 100) accel = 100;
+  if (accel < 0) accel = 0;
+  if (accelBar) accelBar.style.width = `${accel}%`;
+
+  // Extra Data
+  if (extraDataContainer && extraDataContainer.classList.contains("expanded")) {
+    if (valLat) valLat.textContent = (sei.latitude_deg || 0).toFixed(6);
+    if (valLon) valLon.textContent = (sei.longitude_deg || 0).toFixed(6);
+    if (valHeading) valHeading.textContent = (sei.heading_deg || 0).toFixed(1) + "°";
+    if (valAccX) valAccX.textContent = (sei.linear_acceleration_mps2_x || 0).toFixed(2);
+    if (valAccY) valAccY.textContent = (sei.linear_acceleration_mps2_y || 0).toFixed(2);
+    if (valAccZ) valAccZ.textContent = (sei.linear_acceleration_mps2_z || 0).toFixed(2);
+  }
+}

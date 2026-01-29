@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Tesla 360 Viewer - In-browser viewer for Tesla dashcam footage" />
+  <title>Tesla 360 Viewer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚗</text></svg>">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- Telemetry Overlay -->
+  <div id="dashboardVis" class="dashboard-vis hidden">
+    <div class="vis-header">
+        <div class="drag-handle">:::</div>
+    </div>
+    <div class="vis-content">
+        <div class="turn-signal left" id="blinkLeft">
+            <svg viewBox="0 0 24 24"><path d="M14 7l-5 5 5 5V7z" fill="currentColor"/></svg>
+        </div>
+        
+        <div class="center-cluster">
+            <div class="gear-indicator">
+                <span id="gearP" class="gear">P</span>
+                <span id="gearR" class="gear">R</span>
+                <span id="gearN" class="gear">N</span>
+                <span id="gearD" class="gear">D</span>
+            </div>
+            <div class="speed-display">
+                <div class="speed-value" id="speedValue">0</div>
+                <div class="speed-unit">MPH</div>
+            </div>
+            <div class="autopilot-status" id="autopilotStatus">
+                <div class="steering-icon" id="steeringIcon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 2v20M2 12h20"></path>
+                    </svg>
+                </div>
+                <span id="apText">Manual</span>
+            </div>
+            
+            <div class="pedals-cluster">
+                <div class="brake-indicator" id="brakeInd">
+                    <span class="brake-text">BRAKE</span>
+                </div>
+                <div class="accel-meter">
+                    <div class="accel-bar" id="accelBar"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="turn-signal right" id="blinkRight">
+            <svg viewBox="0 0 24 24"><path d="M10 7l5 5-5 5V7z" fill="currentColor"/></svg>
+        </div>
+    </div>
+
+    <!-- Telemetry Details -->
+    <div class="extra-data-container">
+        <button id="toggleExtra" class="toggle-btn" title="Toggle Details">
+            <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+        </button>
+        <div id="extraData" class="extra-data">
+            <div class="data-grid">
+                <div class="data-item">
+                    <span class="label">Lat</span>
+                    <span id="valLat" class="val">--</span>
+                </div>
+                <div class="data-item">
+                    <span class="label">Lon</span>
+                    <span id="valLon" class="val">--</span>
+                </div>
+                <div class="data-item">
+                    <span class="label">Head</span>
+                    <span id="valHeading" class="val">--</span>
+                </div>
+                <div class="data-item">
+                    <span class="label">Acc X</span>
+                    <span id="valAccX" class="val">--</span>
+                </div>
+                <div class="data-item">
+                    <span class="label">Acc Y</span>
+                    <span id="valAccY" class="val">--</span>
+                </div>
+                <div class="data-item">
+                    <span class="label">Acc Z</span>
+                    <span id="valAccZ" class="val">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+  </div>
+
+  <div id="ui">
+    <div class="brand-row">
+      <button id="collapseUiBtn" class="ghost-btn small gear" title="Toggle controls">⚙</button>
+      <div class="brand">Tesla 360</div>
+      <button id="chooseFolderBtn" class="ghost-btn small">Choose TeslaCam folder</button>
+      <input id="folderInput" type="file" webkitdirectory directory multiple hidden />
+      <label class="folder-label">Event: <select id="eventSelect"></select></label>
+      <button id="calendarToggle" class="ghost-btn small">Calendar</button>
+      <button id="telemetryToggle" class="ghost-btn small">Telemetry</button>
+    </div>
+    <div id="calendarPopover" class="calendar-popover hidden">
+      <div id="calendarContainer"></div>
+      <div id="calendarEventsList" class="calendar-events-list"></div>
+    </div>
+    <div class="controls">
+      <label class="status">Status: <span id="statusText">Waiting</span></label>
+    </div>
+    <button id="viewToggle" class="ghost-btn">View settings ▾</button>
+    <div id="viewControlsWrap" class="collapsed">
+      <div class="section-header">View settings</div>
+      <div class="helper-text">Global view, priority, and interaction feel.</div>
+      <div class="settings-stack">
+        <div class="preset-row">
+          <div class="label-col">
+            <label for="presetSelect">Presets</label>
+            <div class="helper-text">Applies yaw/FOV/enabled/priority/lock.</div>
+          </div>
+          <div class="control-col">
+            <div class="inline-actions">
+              <select id="presetSelect"></select>
+              <button id="resetViewBtn" class="ghost-btn small">Reset view</button>
+            </div>
+          </div>
+        </div>
+        <div class="priority-row">
+          <div class="label-col">
+            <label for="prioritySelect">Layer priority</label>
+            <div class="helper-text">Force one camera to win overlaps; None blends.</div>
+          </div>
+          <div class="control-col">
+            <select id="prioritySelect"></select>
+          </div>
+        </div>
+        <div class="top-slider-row">
+          <label for="fovScaleSlider">Global FOV scale: <span id="fovScaleValue">1.00x</span></label>
+          <input id="fovScaleSlider" type="range" min="0.10" max="1.10" step="0.01" value="1.00" />
+        </div>
+        <div class="toggle-row">
+          <label for="invertControlsToggle">Invert drag</label>
+          <input id="invertControlsToggle" type="checkbox" />
+        </div>
+        <div class="toggle-row">
+          <label for="lockPitchToggle">Lock up/down</label>
+          <input id="lockPitchToggle" type="checkbox" />
+        </div>
+      </div>
+      <div class="section-divider"></div>
+      <button id="advancedToggle" class="ghost-btn small inline-toggle">Advanced ▸</button>
+      <div id="advancedWrap" class="advanced-wrap hidden">
+        <div class="helper-text">Export/share or open FFmpeg guidance.</div>
+        <div class="toggle-row">
+          <button id="ffmpegHelpBtn" class="ghost-btn small">FFmpeg export help</button>
+        </div>
+        <div class="section-header">Presets & export</div>
+        <div class="helper-text">Copy current layout as CSV; paste via Presets → Custom…</div>
+        <div class="preset-export">
+          <div class="inline-actions">
+            <button id="exportPresetBtn" class="ghost-btn small">Copy current settings as CSV</button>
+            <div id="exportStatus" class="helper-text success hidden">Copied!</div>
+          </div>
+          <textarea id="presetExportText" readonly placeholder="CSV will appear here" class="preset-export-text" rows="3"></textarea>
+        </div>
+      </div>
+    </div>
+    <button id="camToggle" class="ghost-btn">Camera settings ▾</button>
+    <div id="camControlsWrap" class="collapsed">
+      <div class="section-header cam-header">Camera settings</div>
+      <div class="helper-text">Per-camera yaw/FOV and enable toggles.</div>
+      <div class="toggle-row">
+        <button id="resetCamsBtn" class="ghost-btn small">Reset camera defaults</button>
+      </div>
+      <div id="camControls"></div>
+    </div>
+  </div>
+  <div id="playbackBar">
+    <button id="togglePlayButton" disabled>Pause</button>
+    <span id="currentTime">00:00</span>
+    <input id="seekSlider" type="range" min="0" max="0" step="0.01" value="0" />
+    <span id="durationTime">00:00</span>
+  </div>
+  <div id="viewer"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/flatpickr/4.6.13/flatpickr.min.js"></script>
+  <script src="lib/protobuf.min.js"></script>
+  <script src="lib/dashcam-mp4.js"></script>
+  <script type="module" src="./controls.js"></script>
+</body>
+</html>
+
