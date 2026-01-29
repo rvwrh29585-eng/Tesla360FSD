@@ -1,4 +1,5 @@
 import { state } from "./state.js";
+import { updateGForceFromTelemetry } from "./motionEffects.js";
 
 // DOM Elements
 const dashboardVis = document.getElementById("dashboardVis");
@@ -31,9 +32,19 @@ const valAccZ = document.getElementById("valAccZ");
 let SeiMetadata = null;
 let enumFields = null;
 let mp4Parser = null;
-let frameTimes = []; // Cumulative time in seconds for each frame
 
 const MPS_TO_MPH = 2.23694;
+
+// Current frame SEI data (exposed for motion effects)
+let currentSei = null;
+
+export function getCurrentSei() {
+  return currentSei;
+}
+
+export function getCurrentSpeed() {
+  return currentSei?.vehicle_speed_mps || 0;
+}
 
 export async function initTelemetry() {
   try {
@@ -128,12 +139,15 @@ export async function loadTelemetryForFile(file) {
     // Build time index
     const config = mp4Parser.getConfig();
     let time = 0;
-    frameTimes = [];
+    const frameTimes = [];
     // durations are in ms
     config.durations.forEach((d) => {
       frameTimes.push(time);
       time += d / 1000;
     });
+
+    // Store frameTimes in state for motion effects to access
+    state.frameTimes = frameTimes;
 
     // Ensure we have times for all frames
     if (frameTimes.length < frames.length) {
@@ -151,25 +165,31 @@ export async function loadTelemetryForFile(file) {
   } catch (err) {
     console.error("Telemetry: Error parsing file", err);
     state.telemetryFrames = [];
+    state.frameTimes = [];
   }
 }
 
 export function updateVisForCurrentTime(currentTime) {
-  if (!state.telemetryFrames || state.telemetryFrames.length === 0) return;
+  if (!state.telemetryFrames || state.telemetryFrames.length === 0) {
+    currentSei = null;
+    updateGForceFromTelemetry(null);
+    return;
+  }
   if (currentTime === undefined) {
       // Try to grab from state logic if needed, but usually passed in
       // For now, return if undefined
       return; 
   }
 
-  // Find frame index
-  // Binary search or simple lookup since we are usually playing forward
-  // Simple approximation for now: assumes roughly monotonic increasing
+  const frameTimes = state.frameTimes || [];
+  if (frameTimes.length === 0) {
+    currentSei = null;
+    updateGForceFromTelemetry(null);
+    return;
+  }
+
+  // Find frame index using binary search
   let frameIndex = 0;
-  
-  // Optimization: use last frame index if available in state to start search?
-  // For now, simple findIndex or binary search
-  // Binary search for efficiency
   let low = 0, high = frameTimes.length - 1;
   while (low <= high) {
     const mid = (low + high) >>> 1;
@@ -183,7 +203,13 @@ export function updateVisForCurrentTime(currentTime) {
 
   const frame = state.telemetryFrames[frameIndex];
   if (frame && frame.sei) {
+    currentSei = frame.sei;
     updateVisualization(frame.sei);
+    // Update motion effects with current G-force data
+    updateGForceFromTelemetry(frame.sei);
+  } else {
+    currentSei = null;
+    updateGForceFromTelemetry(null);
   }
 }
 

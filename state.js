@@ -38,6 +38,38 @@ export const state = {
   leaderIndex: -1,
   isSeeking: false,
   presets: [],
+  telemetryFrames: [],
+  frameTimes: [], // Cumulative time in seconds for each frame
+  
+  // Motion effects state
+  motionEffectsEnabled: true,
+  motionIntensity: 1.0, // 0-2 multiplier
+  
+  // Smoothed G-force values (updated each frame)
+  smoothedGForce: {
+    x: 0, // lateral (turning)
+    y: 0, // longitudinal (accel/brake)
+    z: 0, // vertical (bumps)
+  },
+  
+  // Current camera offsets from motion effects
+  cameraMotion: {
+    roll: 0,   // lean into turns (radians)
+    pitch: 0,  // tilt forward/back (radians)
+    shakeX: 0, // horizontal shake
+    shakeY: 0, // vertical shake
+  },
+  
+  // Motion effect configuration
+  motionConfig: {
+    rollMultiplier: 0.03,    // how much lateral G affects roll
+    pitchMultiplier: 0.02,   // how much longitudinal G affects pitch
+    shakeMultiplier: 0.002,  // how much vertical G affects shake
+    smoothingFactor: 0.15,   // lower = smoother (0-1)
+    maxRoll: 0.15,           // max roll in radians (~8.5 degrees)
+    maxPitch: 0.1,           // max pitch in radians (~5.7 degrees)
+    speedShakeBase: 0.0005,  // base shake from speed
+  },
 };
 
 export const CAMS = [

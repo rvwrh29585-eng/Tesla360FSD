@@ -1,7 +1,8 @@
 import * as THREE from "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.180.0/three.module.min.js";
 import { OrbitControls } from "./OrbitControls.js";
 import { state, CAMS, RAD } from "./state.js";
-import { updateVisForCurrentTime } from "./telemetry.js";
+import { updateVisForCurrentTime, getCurrentSpeed } from "./telemetry.js";
+import { calculateCameraMotion, applyCameraMotion, resetMotionEffects } from "./motionEffects.js";
 
 function createVideoElement(src) {
   const video = document.createElement("video");
@@ -168,14 +169,25 @@ function onResize() {
 
 export function renderLoop(seekSlider, currentTimeLabel, formatTimeFn) {
   state.animationHandle = requestAnimationFrame(() => renderLoop(seekSlider, currentTimeLabel, formatTimeFn));
+  
+  // Update orbit controls first
   state.controls.update();
-  state.renderer.render(state.scene, state.camera);
+  
+  // Get current playback time and update telemetry
   if (!state.isSeeking && state.leaderIndex >= 0 && state.videoElements[state.leaderIndex]) {
     const t = state.videoElements[state.leaderIndex].currentTime || 0;
     if (seekSlider) seekSlider.value = t;
     if (currentTimeLabel) currentTimeLabel.textContent = formatTimeFn(t);
     updateVisForCurrentTime(t);
   }
+  
+  // Calculate and apply motion effects based on current G-force
+  const speed = getCurrentSpeed();
+  calculateCameraMotion(speed);
+  applyCameraMotion(state.camera);
+  
+  // Render the scene
+  state.renderer.render(state.scene, state.camera);
 }
 
 export function pauseExperience(setStatus) {
@@ -221,6 +233,9 @@ export function teardownExperience() {
   state.controls = null;
   state.isInitialized = false;
   state.uiCollapsed = false;
+  
+  // Reset motion effects
+  resetMotionEffects();
 }
 
 // Shaders (same as before)

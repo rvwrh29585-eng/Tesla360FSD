@@ -9,6 +9,7 @@ import {
   resumeExperience,
   teardownExperience,
 } from "./stitcher.js";
+import { setMotionEffectsEnabled, setMotionIntensity } from "./motionEffects.js";
 
 const statusText = document.getElementById("statusText");
 const togglePlayButton = document.getElementById("togglePlayButton");
@@ -43,6 +44,9 @@ const resetViewBtn = document.getElementById("resetViewBtn");
 const resetCamsBtn = document.getElementById("resetCamsBtn");
 const advancedToggle = document.getElementById("advancedToggle");
 const advancedWrap = document.getElementById("advancedWrap");
+const motionEffectsToggle = document.getElementById("motionEffectsToggle");
+const motionIntensitySlider = document.getElementById("motionIntensitySlider");
+const motionIntensityValue = document.getElementById("motionIntensityValue");
 
 function setStatus(text) {
   if (statusText) statusText.textContent = text;
@@ -489,6 +493,28 @@ if (lockPitchToggle) {
         state.controls.minPolarAngle = 0;
         state.controls.maxPolarAngle = Math.PI;
       }
+    }
+  });
+}
+
+// Motion effects controls
+if (motionEffectsToggle) {
+  motionEffectsToggle.checked = state.motionEffectsEnabled;
+  motionEffectsToggle.addEventListener("change", (e) => {
+    setMotionEffectsEnabled(e.target.checked);
+  });
+}
+
+if (motionIntensitySlider) {
+  motionIntensitySlider.value = state.motionIntensity;
+  if (motionIntensityValue) {
+    motionIntensityValue.textContent = `${state.motionIntensity.toFixed(1)}x`;
+  }
+  motionIntensitySlider.addEventListener("input", (e) => {
+    const val = parseFloat(e.target.value);
+    setMotionIntensity(val);
+    if (motionIntensityValue) {
+      motionIntensityValue.textContent = `${val.toFixed(1)}x`;
     }
   });
 }
