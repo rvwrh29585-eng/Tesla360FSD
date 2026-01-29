@@ -213,6 +213,12 @@ export function calculateCameraMotion(speed = 0) {
 /**
  * Apply motion effects to the sphere mesh (NOT the camera!)
  * This avoids conflicts with OrbitControls
+ * 
+ * All immersion effects go through the sphere:
+ * - Y rotation (yaw): Auto-steer following
+ * - X rotation (pitch): Acceleration/braking tilt
+ * - Z rotation (roll): Turning lean
+ * - Position offset: Road shake
  */
 export function applySphereMotion(sphere) {
   if (!sphere) return;
@@ -224,6 +230,13 @@ export function applySphereMotion(sphere) {
   // creates the effect of the view tilting
   sphere.rotation.z = motion.roll;
   sphere.rotation.x = motion.pitch;
+  
+  // Apply auto-steer yaw (view follows driving direction)
+  if (state.autoSteerEnabled) {
+    sphere.rotation.y = state.currentSteerYaw;
+  } else {
+    sphere.rotation.y = 0;
+  }
   
   // Apply shake as small position offsets to the sphere
   sphere.position.x = motion.shakeX;
@@ -241,13 +254,18 @@ export function resetMotionEffects() {
   state.cameraMotion.pitch = 0;
   state.cameraMotion.shakeX = 0;
   state.cameraMotion.shakeY = 0;
+  state.currentSteerYaw = 0;
   shakePhase = 0;
   baselineZ = null;
   hasValidTelemetry = false;
+  lastHeading = null;
+  accumulatedHeadingChange = 0;
+  currentSteeringAngle = 0;
   
   // Reset sphere position/rotation if it exists
   if (state.sphere) {
     state.sphere.rotation.x = 0;
+    state.sphere.rotation.y = 0;
     state.sphere.rotation.z = 0;
     state.sphere.position.x = 0;
     state.sphere.position.y = 0;
@@ -263,6 +281,7 @@ export function setMotionEffectsEnabled(enabled) {
     // Reset sphere immediately when disabled
     if (state.sphere) {
       state.sphere.rotation.x = 0;
+      state.sphere.rotation.y = 0;
       state.sphere.rotation.z = 0;
       state.sphere.position.x = 0;
       state.sphere.position.y = 0;
@@ -277,101 +296,89 @@ export function setMotionIntensity(intensity) {
   state.motionIntensity = clamp(intensity, 0, 2);
 }
 
-// ============================================================
-// AUTO-STEER VIEW TRACKING
-// Makes the 360 view naturally follow where the car is going
-// ============================================================
-
-let targetSteerYaw = 0;
-let currentSteeringAngle = 0;
-
 /**
- * Update steering angle from telemetry
+ * Update steering and heading from telemetry
  */
 export function updateSteeringFromTelemetry(sei) {
   if (!sei || !state.autoSteerEnabled) {
-    // Smoothly return to center when disabled
+    // Smoothly decay when disabled
     currentSteeringAngle = lerp(currentSteeringAngle, 0, 0.05);
+    accumulatedHeadingChange = lerp(accumulatedHeadingChange, 0, 0.02);
     return;
   }
   
   // Get steering wheel angle (degrees, positive = right turn)
   const rawAngle = sei.steeringWheelAngle || 0;
-  
-  // Smooth the steering input
   currentSteeringAngle = lerp(currentSteeringAngle, rawAngle, 0.1);
+  
+  // Track heading changes from GPS for smoother turn detection
+  const heading = sei.headingDeg;
+  if (heading !== undefined && heading !== null && !isNaN(heading)) {
+    if (lastHeading !== null) {
+      // Calculate heading delta (handle wrap-around at 0/360)
+      let delta = heading - lastHeading;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      
+      // Accumulate heading change (this tracks actual car rotation)
+      // Positive delta = turning right, negative = turning left
+      accumulatedHeadingChange += delta * 0.01; // Scale down
+      
+      // Decay accumulated change over time (return to center)
+      accumulatedHeadingChange *= 0.98;
+      
+      // Clamp to prevent runaway
+      accumulatedHeadingChange = clamp(accumulatedHeadingChange, -1, 1);
+    }
+    lastHeading = heading;
+  }
 }
 
 /**
- * Calculate auto-steer yaw offset
- * Returns the yaw angle to apply to the view (radians)
+ * Calculate view yaw offset based on steering and heading
+ * This is applied to the sphere Y rotation
  */
 export function calculateAutoSteerYaw(speed = 0) {
   if (!state.autoSteerEnabled || !hasValidTelemetry) {
     // Smoothly return to center
-    state.currentSteerYaw = lerp(state.currentSteerYaw, 0, 0.03);
-    return state.currentSteerYaw;
-  }
-  
-  // Only apply steering-based yaw when moving
-  // (no point tracking steering in a parked car)
-  const isMoving = speed > 1.0; // ~2.2 mph
-  
-  if (!isMoving) {
     state.currentSteerYaw = lerp(state.currentSteerYaw, 0, 0.05);
     return state.currentSteerYaw;
   }
   
-  // Convert steering angle to view yaw
-  // Steering wheel typically has ~540 degrees lock-to-lock
-  // We want a max view rotation of about 45 degrees (0.78 rad) at full lock
-  const maxSteeringAngle = 270; // Half of full lock
-  const maxViewYaw = 0.6; // ~35 degrees max view rotation
+  // Only apply when moving
+  const isMoving = speed > 0.5; // ~1 mph
   
-  // Normalize steering to -1 to 1
-  const normalizedSteering = clamp(currentSteeringAngle / maxSteeringAngle, -1, 1);
+  if (!isMoving) {
+    state.currentSteerYaw = lerp(state.currentSteerYaw, 0, 0.03);
+    return state.currentSteerYaw;
+  }
   
-  // Apply intensity and convert to radians
-  const targetYaw = normalizedSteering * maxViewYaw * state.autoSteerIntensity;
+  // Combine steering and heading for natural tracking
+  // Steering: immediate response to driver input
+  // Heading: actual car direction (smoother, from GPS)
   
-  // Speed-based scaling: more effect at higher speeds
-  // At low speed (parking), less view movement
-  // At highway speed, full effect
-  const speedFactor = clamp(speed / 20, 0.3, 1.0); // 20 m/s ≈ 45 mph for full effect
-  const scaledTargetYaw = targetYaw * speedFactor;
+  // Steering component (anticipate the turn)
+  const maxSteeringAngle = 180; // degrees for full effect
+  const steeringFactor = clamp(currentSteeringAngle / maxSteeringAngle, -1, 1);
   
-  // Smooth the transition (slower for natural feel)
-  state.currentSteerYaw = lerp(state.currentSteerYaw, scaledTargetYaw, 0.04);
+  // Heading component (follow actual car direction)
+  const headingFactor = accumulatedHeadingChange;
+  
+  // Blend: Use steering for quick response, heading for sustained turns
+  // At high speed, favor heading (actual direction)
+  // At low speed, favor steering (driver intent)
+  const speedBlend = clamp(speed / 15, 0, 1); // 15 m/s ≈ 34 mph
+  const blendedFactor = steeringFactor * (1 - speedBlend * 0.5) + headingFactor * speedBlend;
+  
+  // Convert to radians with intensity scaling
+  // Max rotation ~30 degrees (0.52 rad) at full intensity
+  const maxYaw = 0.52 * state.autoSteerIntensity;
+  const targetYaw = blendedFactor * maxYaw;
+  
+  // Smooth transition
+  state.currentSteerYaw = lerp(state.currentSteerYaw, targetYaw, 0.06);
   
   return state.currentSteerYaw;
-}
-
-/**
- * Apply auto-steer yaw to OrbitControls
- * This rotates the view target so the user looks where the car is going
- */
-export function applyAutoSteerToControls(controls, camera) {
-  if (!controls || !camera || !state.autoSteerEnabled) return;
-  
-  const yawOffset = state.currentSteerYaw;
-  
-  // Rotate the controls target around the camera
-  // This makes the view pan in the direction of the turn
-  const targetDistance = 10; // Distance to look-at point
-  
-  // Calculate new target position based on yaw offset
-  // We're inside a sphere, looking outward
-  const baseYaw = Math.atan2(controls.target.x - camera.position.x, 
-                             controls.target.z - camera.position.z);
-  const newYaw = baseYaw + yawOffset;
-  
-  // Only update if there's meaningful change
-  if (Math.abs(yawOffset) > 0.001) {
-    // Gently nudge the target toward the steering direction
-    // This creates a natural "look where you're going" effect
-    controls.target.x = camera.position.x + Math.sin(newYaw) * targetDistance * 0.01;
-    controls.target.z = camera.position.z + Math.cos(newYaw) * targetDistance * 0.01;
-  }
 }
 
 /**
@@ -379,6 +386,11 @@ export function applyAutoSteerToControls(controls, camera) {
  */
 export function setAutoSteerEnabled(enabled) {
   state.autoSteerEnabled = enabled;
+  if (!enabled) {
+    // Reset tracking state
+    lastHeading = null;
+    accumulatedHeadingChange = 0;
+  }
 }
 
 /**
