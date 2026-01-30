@@ -16,6 +16,11 @@ let shakePhase = 0;
 let baselineZ = null;
 let hasValidTelemetry = false;
 
+// Steering and heading tracking
+let currentSteeringAngle = 0;
+let lastHeading = null;
+let accumulatedHeadingChange = 0;
+
 /**
  * Smooth interpolation (exponential moving average)
  */
