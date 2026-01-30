@@ -288,6 +288,7 @@ void main() {
 
   vec3 color = vec3(0.0);
   float weightSum = 0.0;
+  bool foundExactMatch = false;
 
   for (int i = 0; i < 6; i++) {
     if (!enabled[i]) continue;
@@ -298,19 +299,34 @@ void main() {
     float hHalf = fovH[i] * 0.5;
     float vHalf = fovV[i] * 0.5;
 
-    if (abs(hAng) > (hHalf + overlap) || abs(vAng) > (vHalf + overlap)) {
+    // Allow sample if within FOV + overlap, or slightly beyond for pole stretching
+    float verticalExtension = vHalf * 0.6; // Stretch edges up to 60% beyond FOV
+    if (abs(hAng) > (hHalf + overlap) || abs(vAng) > (vHalf + verticalExtension)) {
       continue;
     }
 
     float hBlend = 1.0 - smoothstep(hHalf, hHalf + overlap, abs(hAng));
-    float vBlend = 1.0 - smoothstep(vHalf, vHalf + overlap, abs(vAng));
+    
+    // Stretch vertical blending: fade smoothly beyond the FOV edge
+    float vBlend;
+    if (abs(vAng) <= vHalf) {
+      vBlend = 1.0;
+    } else {
+      // Beyond FOV: fade out over the extension region
+      float overExtend = abs(vAng) - vHalf;
+      vBlend = 1.0 - smoothstep(0.0, verticalExtension, overExtend);
+    }
+    
     float w = hBlend * vBlend;
     if (w <= 0.0001) {
       continue;
     }
 
     float u = 0.5 + (tan(hAng) / tan(hHalf)) * 0.5;
-    float v = 0.5 - (tan(vAng) / tan(vHalf)) * 0.5;
+    
+    // Clamp vertical to edge when stretching beyond FOV
+    float clampedVAng = clamp(vAng, -vHalf, vHalf);
+    float v = 0.5 - (tan(clampedVAng) / tan(vHalf)) * 0.5;
 
     if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) {
       continue;
@@ -321,8 +337,10 @@ void main() {
       gl_FragColor = vec4(texel.rgb, 1.0);
       return;
     }
+    
     color += texel.rgb * w;
     weightSum += w;
+    if (w > 0.9) foundExactMatch = true;
   }
 
   if (weightSum > 0.0) {
