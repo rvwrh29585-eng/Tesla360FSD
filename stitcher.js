@@ -288,7 +288,6 @@ void main() {
 
   vec3 color = vec3(0.0);
   float weightSum = 0.0;
-  bool foundExactMatch = false;
 
   for (int i = 0; i < 6; i++) {
     if (!enabled[i]) continue;
@@ -299,34 +298,43 @@ void main() {
     float hHalf = fovH[i] * 0.5;
     float vHalf = fovV[i] * 0.5;
 
-    // Allow sample if within FOV + overlap, or slightly beyond for pole stretching
-    float verticalExtension = vHalf * 0.6; // Stretch edges up to 60% beyond FOV
-    if (abs(hAng) > (hHalf + overlap) || abs(vAng) > (vHalf + verticalExtension)) {
+    // Horizontal: strict bounds with overlap blending
+    if (abs(hAng) > (hHalf + overlap)) {
+      continue;
+    }
+    
+    // Vertical: extend beyond native FOV to fill poles
+    // Allow sampling up to 80% beyond the FOV edge
+    float vStretchFactor = 0.8;
+    float maxVAng = vHalf + (vHalf * vStretchFactor);
+    
+    if (abs(vAng) > maxVAng) {
       continue;
     }
 
+    // Horizontal blending: sharp cutoff at overlap boundary
     float hBlend = 1.0 - smoothstep(hHalf, hHalf + overlap, abs(hAng));
     
-    // Stretch vertical blending: fade smoothly beyond the FOV edge
-    float vBlend;
-    if (abs(vAng) <= vHalf) {
-      vBlend = 1.0;
-    } else {
-      // Beyond FOV: fade out over the extension region
-      float overExtend = abs(vAng) - vHalf;
-      vBlend = 1.0 - smoothstep(0.0, verticalExtension, overExtend);
+    // Vertical blending: within FOV = full weight, beyond = fade to zero
+    float vBlend = 1.0;
+    float vOverage = abs(vAng) - vHalf;
+    
+    if (vOverage > 0.0) {
+      // Beyond the native FOV edge: smooth fade over stretch region
+      float stretchRange = vHalf * vStretchFactor;
+      vBlend = 1.0 - smoothstep(0.0, stretchRange, vOverage);
+      vBlend = max(vBlend, 0.0);
     }
     
     float w = hBlend * vBlend;
-    if (w <= 0.0001) {
+    if (w < 0.001) {
       continue;
     }
 
+    // Sample position: clamp V to camera's native boundaries to get edge pixel
     float u = 0.5 + (tan(hAng) / tan(hHalf)) * 0.5;
-    
-    // Clamp vertical to edge when stretching beyond FOV
-    float clampedVAng = clamp(vAng, -vHalf, vHalf);
-    float v = 0.5 - (tan(clampedVAng) / tan(vHalf)) * 0.5;
+    float sampleVAng = clamp(vAng, -vHalf, vHalf);
+    float v = 0.5 - (tan(sampleVAng) / tan(vHalf)) * 0.5;
 
     if (u < 0.0 || u > 1.0 || v < 0.0 || v > 1.0) {
       continue;
@@ -340,7 +348,6 @@ void main() {
     
     color += texel.rgb * w;
     weightSum += w;
-    if (w > 0.9) foundExactMatch = true;
   }
 
   if (weightSum > 0.0) {
