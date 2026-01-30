@@ -12,14 +12,17 @@ import { state } from "./state.js";
 // Noise generator for organic shake effect
 let shakePhase = 0;
 
-// Baseline Z acceleration (gravity) - calibrated on first valid reading
+// Baseline Z acceleration (gravity) - calibrated using running average
 let baselineZ = null;
+let baselineZSamples = []; // Running average buffer
+const BASELINE_SAMPLE_SIZE = 30; // ~1 second at 30fps
 let hasValidTelemetry = false;
 
 // Steering and heading tracking
 let currentSteeringAngle = 0;
 let lastHeading = null;
 let accumulatedHeadingChange = 0;
+let lastSteeringUpdate = 0; // For hysteresis
 
 /**
  * Smooth interpolation (exponential moving average)
@@ -115,10 +118,16 @@ export function updateGForceFromTelemetry(sei) {
   const rawY = sei.linearAccelerationMps2Y || 0;
   const rawZ = sei.linearAccelerationMps2Z || 0;
 
-  // Calibrate baseline Z on first valid reading
-  // This accounts for gravity and sensor mounting
-  if (baselineZ === null && rawZ !== 0) {
-    baselineZ = rawZ;
+  // Calibrate baseline Z using running average (more robust than first reading)
+  // Keep buffer of recent readings to smooth out sensor noise
+  if (baselineZ === null || baselineZSamples.length < BASELINE_SAMPLE_SIZE) {
+    baselineZSamples.push(rawZ);
+    if (baselineZSamples.length > BASELINE_SAMPLE_SIZE) {
+      baselineZSamples.shift();
+    }
+    // Calculate average from buffer
+    const sum = baselineZSamples.reduce((a, b) => a + b, 0);
+    baselineZ = sum / baselineZSamples.length;
   }
 
   // Subtract baseline from Z to get bump-only component
@@ -224,28 +233,43 @@ export function calculateCameraMotion(speed = 0) {
  * - X rotation (pitch): Acceleration/braking tilt
  * - Z rotation (roll): Turning lean
  * - Position offset: Road shake
+ * 
+ * Zoom-based damping: Effects are scaled inversely with camera distance
+ * Zoomed in close = minimal effects (perspective makes them feel wrong)
+ * Zoomed out far = full effects (natural immersive view)
  */
 export function applySphereMotion(sphere) {
-  if (!sphere) return;
+  if (!sphere || !state.camera || !state.controls) return;
   
   const motion = state.cameraMotion;
   
-  // Apply roll and pitch to the sphere
+  // Calculate zoom damping factor based on camera distance from sphere center
+  // At minDistance (zoomed in): damping ≈ 0.2 (minimize effects)
+  // At maxDistance (zoomed out): damping ≈ 1.0 (full effects)
+  const distance = state.camera.position.length();
+  const minDist = state.controls.minDistance || 0.01;
+  const maxDist = state.controls.maxDistance || 2;
+  const normalizedZoom = (distance - minDist) / (maxDist - minDist);
+  const zoomDamping = 0.2 + normalizedZoom * 0.8; // Range: 0.2 to 1.0
+  
+  // Apply roll and pitch to the sphere, damped by zoom level
   // Since the camera looks at the sphere from inside, rotating the sphere
   // creates the effect of the view tilting
-  sphere.rotation.z = motion.roll;
-  sphere.rotation.x = motion.pitch;
+  sphere.rotation.z = motion.roll * zoomDamping;
+  sphere.rotation.x = motion.pitch * zoomDamping;
   
   // Apply auto-steer yaw (view follows driving direction)
+  // Less damping for yaw since it's directional, not disorienting
   if (state.autoSteerEnabled) {
-    sphere.rotation.y = state.currentSteerYaw;
+    sphere.rotation.y = state.currentSteerYaw * (0.5 + normalizedZoom * 0.5);
   } else {
     sphere.rotation.y = 0;
   }
   
   // Apply shake as small position offsets to the sphere
-  sphere.position.x = motion.shakeX;
-  sphere.position.y = motion.shakeY;
+  // Also damped by zoom level
+  sphere.position.x = motion.shakeX * zoomDamping;
+  sphere.position.y = motion.shakeY * zoomDamping;
 }
 
 /**
@@ -262,10 +286,12 @@ export function resetMotionEffects() {
   state.currentSteerYaw = 0;
   shakePhase = 0;
   baselineZ = null;
+  baselineZSamples = [];
   hasValidTelemetry = false;
   lastHeading = null;
   accumulatedHeadingChange = 0;
   currentSteeringAngle = 0;
+  lastSteeringUpdate = 0;
   
   // Reset sphere position/rotation if it exists
   if (state.sphere) {
@@ -314,7 +340,19 @@ export function updateSteeringFromTelemetry(sei) {
   
   // Get steering wheel angle (degrees, positive = right turn)
   const rawAngle = sei.steeringWheelAngle || 0;
-  currentSteeringAngle = lerp(currentSteeringAngle, rawAngle, 0.1);
+  
+  // Apply hysteresis: only update if change is significant (reduce jitter around zero)
+  const steeringDelta = Math.abs(rawAngle - currentSteeringAngle);
+  const hysteresisThreshold = 2.0; // Only update if steering changes by >2 degrees
+  
+  if (steeringDelta > hysteresisThreshold || lastSteeringUpdate === 0) {
+    currentSteeringAngle = lerp(currentSteeringAngle, rawAngle, 0.1);
+    lastSteeringUpdate = Date.now();
+  } else if (Date.now() - lastSteeringUpdate > 500) {
+    // Force update every 500ms even if below threshold (prevent getting stuck)
+    currentSteeringAngle = lerp(currentSteeringAngle, rawAngle, 0.05);
+    lastSteeringUpdate = Date.now();
+  }
   
   // Track heading changes from GPS for smoother turn detection
   const heading = sei.headingDeg;
